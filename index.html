@@ -406,29 +406,20 @@ function setSyncStatus(s){
   else{el.className='sync-status err';el.textContent='✗ エラー';}
 }
 
-async function apiGet(type){
-  const url=`${API_URL}?token=${encodeURIComponent(SESSION_TOKEN)}&type=${type}&ua=${encodeURIComponent(navigator.userAgent.substring(0,50))}`;
-  const r=await fetch(url);
-  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+async function apiCall(params){
+  const base={...params};
+  if(SESSION_TOKEN && !base.token) base.token=SESSION_TOKEN;
+  base.ua=navigator.userAgent.substring(0,80);
+  if(Array.isArray(base.numbers)) base.numbers=base.numbers.join(',');
+  const query=Object.entries(base).map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
+  const r=await fetch(API_URL+'?'+query);
+  if(!r.ok) throw new Error('HTTP '+r.status);
   const data=await r.json();
   if(!data.ok && (data.error||'').includes('セッション')){clearSession();showToast('セッション切れです。再ログインしてください',true);}
   return data;
 }
-
-async function apiPost(body){
-  const payload={...body};
-  if(SESSION_TOKEN && !payload.token) payload.token=SESSION_TOKEN;
-  if(!payload.ua) payload.ua=navigator.userAgent.substring(0,50);
-  const r=await fetch(API_URL,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(payload)
-  });
-  if(!r.ok) throw new Error(`HTTP ${r.status}`);
-  const data=await r.json();
-  if(!data.ok && (data.error||'').includes('セッション')){clearSession();showToast('セッション切れです。再ログインしてください',true);}
-  return data;
-}
+async function apiGet(type){ return apiCall({action:'get',type}); }
+async function apiPost(body){ return apiCall(body); }
 
 // ===== 同期 =====
 async function syncAll(){
