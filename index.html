@@ -131,8 +131,6 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
   <h1>LOTTERY ANALYZER</h1>
   <p>ログインIDとパスワードを入力してください</p>
   <div class="login-card">
-    <label>GAS API URL</label>
-    <input type="text" id="api-url-input" placeholder="https://script.google.com/macros/s/..." autocomplete="off" />
     <label>ログインID</label>
     <input type="text" id="loginid-input" placeholder="ログインID" autocomplete="username" />
     <label>パスワード</label>
@@ -142,7 +140,6 @@ input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
     <div class="login-err" id="login-err"></div>
     <button class="btn accent" id="login-btn" onclick="login()">ログイン</button>
     <div style="font-size:10px;color:var(--text3);line-height:1.6">
-      URLとログイン情報はこのブラウザに保存されます<br>
       セッションは24時間有効です
     </div>
   </div>
@@ -270,12 +267,15 @@ const TYPES={
   num3:{label:'ナンバーズ3',digits:3},
   num4:{label:'ナンバーズ4',digits:4},
 };
+
+// ★ デプロイ後にGAS Web AppのURLをここに貼り付けてください
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbynVGIN0Nc0m-cQHvYRaLuAsqki7nHsSRnTAdB4heGqWqkl1hnILpndWodskerVq8U/exec';
+
 const TOKEN_KEY   = 'lottery_token';
-const APIURL_KEY  = 'lottery_api_url';
 const EXPIRE_KEY  = 'lottery_token_expire';
 const TOKEN_HOURS = 24;
 
-let API_URL      = '';
+let API_URL      = GAS_API_URL;
 let SESSION_TOKEN= '';
 let currentType  = 'loto6';
 let state        = {};
@@ -294,17 +294,15 @@ Object.keys(TYPES).forEach(initFreq);
 
 // ===== 認証 =====
 async function login(){
-  const url      = document.getElementById('api-url-input').value.trim();
   const loginId  = document.getElementById('loginid-input').value.trim();
   const pw       = document.getElementById('pw-input').value.trim();
   const err      = document.getElementById('login-err');
-  if(!url||!loginId||!pw){err.textContent='URL・ログインID・パスワードをすべて入力してください';return;}
+  if(!loginId||!pw){err.textContent='ログインIDとパスワードを入力してください';return;}
 
   const btn = document.getElementById('login-btn');
   btn.disabled=true;btn.textContent='確認中...';err.textContent='';
 
   try{
-    API_URL = url;
     const ua = navigator.userAgent;
     const r  = await apiPost({action:'login', loginId, password:pw, ua});
     if(!r.ok){
@@ -317,13 +315,12 @@ async function login(){
     SESSION_TOKEN = r.token;
     const expire  = new Date().getTime() + TOKEN_HOURS * 3600 * 1000;
     localStorage.setItem(TOKEN_KEY,  SESSION_TOKEN);
-    localStorage.setItem(APIURL_KEY, url);
     localStorage.setItem(EXPIRE_KEY, String(expire));
     showMain();
     syncAll();
     startSessionTimer(expire);
   }catch(e){
-    err.textContent = 'サーバーに接続できませんでした。URLを確認してください';
+    err.textContent = 'サーバーに接続できませんでした。しばらく後で再試行してください';
   }finally{
     btn.disabled=false;btn.textContent='ログイン';
   }
@@ -355,7 +352,7 @@ async function logout(){
 function clearSession(){
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(EXPIRE_KEY);
-  SESSION_TOKEN='';API_URL='';
+  SESSION_TOKEN='';
   if(sessionTimer) clearInterval(sessionTimer);
   document.getElementById('main-screen').style.display='none';
   document.getElementById('login-screen').style.display='flex';
@@ -387,11 +384,9 @@ function startSessionTimer(expire){
 // 自動ログイン復元
 window.addEventListener('load',()=>{
   const token  = localStorage.getItem(TOKEN_KEY);
-  const url    = localStorage.getItem(APIURL_KEY);
   const expire = parseInt(localStorage.getItem(EXPIRE_KEY)||'0');
-  if(token && url && new Date().getTime() < expire){
-    API_URL=url; SESSION_TOKEN=token;
-    document.getElementById('api-url-input').value=url;
+  if(token && new Date().getTime() < expire){
+    SESSION_TOKEN=token;
     showMain();
     syncAll();
     startSessionTimer(expire);
