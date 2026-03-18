@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LOTTERY ANALYZER</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0f;--surface:#13131a;--surface2:#1c1c26;--surface3:#242430;
+  --accent:#e8c84a;--accent2:#4ae8b0;--accent3:#e84a7a;
+  --text:#f0f0f8;--text2:#9090a8;--text3:#5a5a70;
+  --border:#2a2a38;--radius:10px;
+}
+html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'Noto Sans JP',sans-serif}
+.app{max-width:900px;margin:0 auto;padding:16px}
+
+/* ログイン画面 */
+#login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px}
+#login-screen h1{font-family:'Space Mono',monospace;color:var(--accent);font-size:22px;letter-spacing:0.1em}
+#login-screen p{font-size:12px;color:var(--text3)}
+.login-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px 32px;width:100%;max-width:340px;display:flex;flex-direction:column;gap:12px}
+.login-card label{font-size:12px;color:var(--text3)}
+.login-card input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'Noto Sans JP',sans-serif;font-size:14px;padding:10px 12px;outline:none;letter-spacing:0.1em}
+.login-card input:focus{border-color:var(--accent)}
+.login-card .err{font-size:11px;color:var(--accent3);min-height:14px}
+
+/* ヘッダー */
+.header{display:flex;align-items:center;justify-content:space-between;padding:16px 0 20px;flex-wrap:wrap;gap:8px}
+.header h1{font-family:'Space Mono',monospace;font-size:clamp(15px,3.5vw,22px);letter-spacing:0.08em;color:var(--accent);font-weight:700}
+.header-right{display:flex;align-items:center;gap:8px}
+.sync-status{font-size:10px;padding:4px 10px;border-radius:12px;border:1px solid var(--border);color:var(--text3);font-family:'Space Mono',monospace}
+.sync-status.ok{border-color:#4ae8b0;color:#4ae8b0}
+.sync-status.err{border-color:var(--accent3);color:var(--accent3)}
+.sync-status.loading{border-color:var(--accent);color:var(--accent)}
+
+/* タブ */
+.type-tabs{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:20px}
+.type-tab{padding:7px 14px;border-radius:20px;border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:12px;font-family:'Space Mono',monospace;cursor:pointer;transition:all 0.2s;white-space:nowrap}
+.type-tab:hover{border-color:var(--accent);color:var(--accent)}
+.type-tab.active{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700}
+
+/* メトリクス */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
+.metric{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
+.metric-label{font-size:10px;color:var(--text3);letter-spacing:0.05em;margin-bottom:4px}
+.metric-val{font-size:20px;font-weight:700;font-family:'Space Mono',monospace;color:var(--accent)}
+
+/* グリッド */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+@media(max-width:600px){.grid2{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}}
+
+/* カード */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.card-title{font-size:11px;color:var(--text3);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;font-family:'Space Mono',monospace}
+
+/* 入力 */
+input[type=text]{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'Noto Sans JP',sans-serif;font-size:13px;padding:8px 10px;outline:none;transition:border-color 0.2s}
+input[type=text]:focus{border-color:var(--accent)}
+
+/* ボタン */
+.btn{cursor:pointer;border-radius:6px;font-family:'Noto Sans JP',sans-serif;font-size:12px;padding:8px 14px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);transition:all 0.15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn:active{transform:scale(0.97)}
+.btn:disabled{opacity:0.4;cursor:not-allowed}
+.btn.accent{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700}
+.btn.accent:hover{background:#f0d060}
+.btn.green{background:var(--accent2);border-color:var(--accent2);color:#000;font-weight:700}
+.btn.green:hover{background:#60f0c0}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+/* ボール */
+.balls-wrap{display:flex;flex-wrap:wrap;gap:6px}
+.ball{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-family:'Space Mono',monospace;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text2);transition:all 0.15s;user-select:none}
+.ball:hover{border-color:var(--accent);color:var(--accent)}
+.ball.sel{background:var(--accent);border-color:var(--accent);color:#000}
+.ball.hot{border-color:#e84a7a;color:#e84a7a}
+.ball.warm{border-color:#e8a44a;color:#e8a44a}
+.ball.cold{border-color:#4a9ae8;color:#4a9ae8}
+.ball.sel.hot,.ball.sel.warm,.ball.sel.cold{background:var(--accent);border-color:var(--accent);color:#000}
+@media(max-width:400px){.ball{width:32px;height:32px;font-size:11px}}
+
+/* 選択表示 */
+.sel-row{display:flex;gap:8px;flex-wrap:wrap;min-height:44px;align-items:center;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);margin-top:10px}
+.sel-ball{width:40px;height:40px;border-radius:50%;background:var(--accent);color:#000;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:'Space Mono',monospace}
+
+/* 頻度バー */
+.freq-list{max-height:300px;overflow-y:auto;padding-right:4px}
+.freq-list::-webkit-scrollbar{width:3px}
+.freq-list::-webkit-scrollbar-thumb{background:var(--border)}
+.freq-row{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.freq-num{font-size:11px;font-family:'Space Mono',monospace;min-width:32px;text-align:right;color:var(--text2)}
+.freq-bar-bg{flex:1;height:8px;background:var(--surface3);border-radius:4px;overflow:hidden}
+.freq-bar{height:100%;border-radius:4px;transition:width 0.4s}
+.freq-cnt{font-size:10px;color:var(--text3);min-width:20px}
+
+/* 履歴 */
+.hist-row{display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--border)}
+.hist-row:last-child{border-bottom:none}
+.h-ball{width:26px;height:26px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:10px;font-family:'Space Mono',monospace;color:var(--text2)}
+.h-idx{font-size:10px;color:var(--text3);min-width:28px;font-family:'Space Mono',monospace}
+.hist-scroll{max-height:220px;overflow-y:auto}
+
+/* AI提案 */
+.suggest-box{background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);padding:12px;margin-top:10px;display:none}
+.suggest-title{font-size:10px;color:var(--accent);letter-spacing:0.1em;margin-bottom:8px;font-family:'Space Mono',monospace}
+
+/* Numbers */
+.num-display{font-family:'Space Mono',monospace;font-size:clamp(32px,8vw,52px);font-weight:700;color:var(--accent);letter-spacing:0.15em;text-align:center;padding:16px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);margin:10px 0}
+
+/* legend */
+.leg{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text3)}
+.leg-dot{width:8px;height:8px;border-radius:50%}
+
+/* CSV hint */
+.csv-hint{font-size:10px;color:var(--text3);margin-top:6px;line-height:1.6}
+
+/* グラフ */
+.chart-wrap{position:relative;width:100%;height:200px}
+
+/* スピナー */
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:4px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* トースト */
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--accent);color:#000;padding:8px 20px;border-radius:20px;font-size:12px;font-weight:700;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:999;white-space:nowrap}
+</style>
+</head>
+<body>
+
+<!-- ログイン画面 -->
+<div id="login-screen">
+  <h1>LOTTERY ANALYZER</h1>
+  <p>パスワードを入力してください</p>
+  <div class="login-card">
+    <label>GAS API URL</label>
+    <input type="text" id="api-url-input" placeholder="https://script.google.com/macros/s/..." />
+    <label>パスワード</label>
+    <input type="text" id="pw-input" placeholder="パスワード" />
+    <div class="err" id="login-err"></div>
+    <button class="btn accent" onclick="login()">ログイン</button>
+  </div>
+</div>
+
+<!-- メイン画面 -->
+<div id="main-screen" style="display:none">
+<div class="app">
+  <div class="header">
+    <h1>LOTTERY ANALYZER</h1>
+    <div class="header-right">
+      <span class="sync-status" id="sync-status">—</span>
+      <button class="btn" onclick="syncAll()" style="font-size:11px;padding:5px 10px">↺ 同期</button>
+      <button class="btn" onclick="logout()" style="font-size:11px;padding:5px 10px;color:#e84a7a;border-color:#e84a7a30">ログアウト</button>
+    </div>
+  </div>
+
+  <div class="type-tabs">
+    <button class="type-tab active" onclick="setType('loto6')">ロト6</button>
+    <button class="type-tab" onclick="setType('loto7')">ロト7</button>
+    <button class="type-tab" onclick="setType('miniloto')">ミニロト</button>
+    <button class="type-tab" onclick="setType('num3')">ナンバーズ3</button>
+    <button class="type-tab" onclick="setType('num4')">ナンバーズ4</button>
+  </div>
+
+  <div class="metrics">
+    <div class="metric"><div class="metric-label">記録数</div><div class="metric-val" id="m-count">0</div></div>
+    <div class="metric"><div class="metric-label">最頻出</div><div class="metric-val" id="m-hot">—</div></div>
+    <div class="metric"><div class="metric-label">最少出現</div><div class="metric-val" id="m-cold">—</div></div>
+    <div class="metric"><div class="metric-label">平均</div><div class="metric-val" id="m-avg">—</div></div>
+  </div>
+
+  <!-- ロト系パネル -->
+  <div id="panel-ball">
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">番号入力 / CSV取込</div>
+        <input type="text" id="hist-input" placeholder="例: 3 14 25 31 38 43" />
+        <div class="btn-row">
+          <button class="btn accent" id="btn-add" onclick="addHistoryBall()">追加</button>
+          <button class="btn" onclick="document.getElementById('csv-file').click()">CSV</button>
+          <input type="file" id="csv-file" accept=".csv,.txt" style="display:none" onchange="loadCSV(event)"/>
+          <button class="btn" onclick="clearAll()" style="color:#e84a7a;border-color:#e84a7a30">全消去</button>
+        </div>
+        <div class="csv-hint">CSV: 1行にカンマ区切りで番号（複数行OK）</div>
+        <div class="hist-scroll" style="margin-top:10px"><div id="hist-list"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">出現頻度</div>
+        <div class="leg">
+          <div class="leg-item"><div class="leg-dot" style="background:#e84a7a"></div>上位20%</div>
+          <div class="leg-item"><div class="leg-dot" style="background:#e8a44a"></div>上位50%</div>
+          <div class="leg-item"><div class="leg-dot" style="background:#4a9ae8"></div>下位20%</div>
+        </div>
+        <div class="freq-list" id="freq-list"><div style="font-size:12px;color:var(--text3)">データを読み込むと表示されます</div></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">番号を選ぶ</div>
+      <div class="balls-wrap" id="ball-grid"></div>
+      <div class="sel-row" id="sel-display"><span style="font-size:12px;color:var(--text3)">番号を選んでください</span></div>
+      <div class="btn-row">
+        <button class="btn accent" onclick="quickPick()">クイックピック</button>
+        <button class="btn green" onclick="aiSuggest()">AI提案</button>
+        <button class="btn" onclick="clearSel()">クリア</button>
+      </div>
+      <div class="suggest-box" id="suggest-box">
+        <div class="suggest-title">AI SUGGESTION</div>
+        <div id="suggest-content"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">グラフ</div>
+      <div class="chart-wrap"><canvas id="freqChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ナンバーズパネル -->
+  <div id="panel-num" style="display:none">
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">当選番号入力 / CSV取込</div>
+        <input type="text" id="num-input" placeholder="例: 456" />
+        <div class="btn-row">
+          <button class="btn accent" id="btn-add-num" onclick="addHistoryNum()">追加</button>
+          <button class="btn" onclick="document.getElementById('csv-file-num').click()">CSV</button>
+          <input type="file" id="csv-file-num" accept=".csv,.txt" style="display:none" onchange="loadCSVNum(event)"/>
+          <button class="btn" onclick="clearAll()" style="color:#e84a7a;border-color:#e84a7a30">全消去</button>
+        </div>
+        <div class="csv-hint">CSV: 1行1番号（例: 456）</div>
+        <div class="hist-scroll" style="margin-top:10px"><div id="num-hist-list"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">桁別 出現頻度 (0〜9)</div>
+        <div id="digit-freq"><div style="font-size:12px;color:var(--text3)">データを読み込むと表示されます</div></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">番号を選ぶ</div>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="num-pick-input" style="max-width:140px;font-family:'Space Mono',monospace;font-size:18px;text-align:center" placeholder="---" />
+        <button class="btn accent" onclick="numQuickPick()">クイックピック</button>
+        <button class="btn green" onclick="numAiSuggest()">AI提案</button>
+      </div>
+      <div class="num-display" id="num-display">—</div>
+      <div class="suggest-box" id="num-suggest-box">
+        <div class="suggest-title">AI SUGGESTION</div>
+        <div id="num-suggest-content"></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+// ===== 設定 =====
+const TYPES={
+  loto6:{label:'ロト6',min:1,max:43,pick:6},
+  loto7:{label:'ロト7',min:1,max:37,pick:7},
+  miniloto:{label:'ミニロト',min:1,max:31,pick:5},
+  num3:{label:'ナンバーズ3',digits:3},
+  num4:{label:'ナンバーズ4',digits:4},
+};
+
+let API_URL='';
+let PASSWORD='';
+let currentType='loto6';
+let state={};
+for(const k in TYPES)state[k]={histories:[],freq:{},selected:[]};
+
+function isNum(t){return t==='num3'||t==='num4'}
+
+function initFreq(t){
+  state[t].freq={};
+  const tp=TYPES[t];
+  if(isNum(t)){const max=t==='num3'?1000:10000;for(let i=0;i<max;i++)state[t].freq[i]=0;}
+  else{for(let i=tp.min;i<=tp.max;i++)state[t].freq[i]=0;}
+}
+Object.keys(TYPES).forEach(initFreq);
+
+// ===== 認証 =====
+function login(){
+  const url=document.getElementById('api-url-input').value.trim();
+  const pw=document.getElementById('pw-input').value.trim();
+  if(!url||!pw){document.getElementById('login-err').textContent='URLとパスワードを入力してください';return;}
+  API_URL=url;PASSWORD=pw;
+  localStorage.setItem('lottery_api_url',url);
+  localStorage.setItem('lottery_pw',pw);
+  document.getElementById('login-err').textContent='';
+  showMain();
+  syncAll();
+}
+
+function logout(){
+  localStorage.removeItem('lottery_api_url');
+  localStorage.removeItem('lottery_pw');
+  API_URL='';PASSWORD='';
+  document.getElementById('main-screen').style.display='none';
+  document.getElementById('login-screen').style.display='flex';
+}
+
+function showMain(){
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('main-screen').style.display='block';
+  renderBalls();
+}
+
+// 保存済み認証情報で自動ログイン
+window.addEventListener('load',()=>{
+  const url=localStorage.getItem('lottery_api_url');
+  const pw=localStorage.getItem('lottery_pw');
+  if(url&&pw){
+    API_URL=url;PASSWORD=pw;
+    document.getElementById('api-url-input').value=url;
+    document.getElementById('pw-input').value=pw;
+    showMain();
+    syncAll();
+  }
+});
+
+// ===== API通信 =====
+function setSyncStatus(s){
+  const el=document.getElementById('sync-status');
+  if(s==='loading'){el.className='sync-status loading';el.innerHTML='<span class="spinner"></span>同期中';}
+  else if(s==='ok'){el.className='sync-status ok';el.textContent='✓ 同期済み';}
+  else{el.className='sync-status err';el.textContent='✗ エラー';}
+}
+
+async function apiGet(type){
+  const url=`${API_URL}?password=${encodeURIComponent(PASSWORD)}&type=${type}`;
+  const r=await fetch(url);
+  if(!r.ok)throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function apiPost(body){
+  const r=await fetch(API_URL,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({...body,password:PASSWORD})
+  });
+  if(!r.ok)throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+// ===== 同期 =====
+async function syncAll(){
+  setSyncStatus('loading');
+  try{
+    const data=await apiGet(currentType);
+    if(!data.ok)throw new Error(data.error);
+    loadRecords(currentType,data.records);
+    setSyncStatus('ok');
+  }catch(e){
+    setSyncStatus('err');
+    showToast('同期失敗: '+e.message);
+  }
+}
+
+function loadRecords(type,records){
+  initFreq(type);
+  state[type].histories=[];
+  records.forEach(rec=>{
+    const nums=rec.numbers.map(x=>isNum(type)?x:+x);
+    state[type].histories.push({nums,rowIndex:rec.rowIndex,timestamp:rec.timestamp});
+    if(!isNum(type)){
+      nums.forEach(n=>state[type].freq[+n]=(state[type].freq[+n]||0)+1);
+    } else {
+      const n=+rec.numbers[0];
+      state[type].freq[n]=(state[type].freq[n]||0)+1;
+    }
+  });
+  afterUpdate();
+}
+
+// ===== タイプ切替 =====
+function setType(t){
+  currentType=t;
+  document.querySelectorAll('.type-tab').forEach((el,i)=>{
+    el.classList.toggle('active',Object.keys(TYPES)[i]===t);
+  });
+  const num=isNum(t);
+  document.getElementById('panel-ball').style.display=num?'none':'block';
+  document.getElementById('panel-num').style.display=num?'block':'none';
+  if(!num){renderBalls();renderFreq();renderChart();}
+  else{renderDigitFreq();renderNumHist();}
+  updateMetrics();
+  syncAll();
+}
+
+// ===== ボール系 =====
+function getHotCold(t){
+  const f=state[t].freq;const tp=TYPES[t];
+  const entries=[];
+  for(let i=tp.min;i<=tp.max;i++)entries.push([i,f[i]||0]);
+  entries.sort((a,b)=>b[1]-a[1]);
+  const n=entries.length;
+  const hot=new Set(entries.slice(0,Math.ceil(n*0.2)).map(x=>x[0]));
+  const warm=new Set(entries.slice(0,Math.ceil(n*0.5)).map(x=>x[0]));
+  const cold=new Set(entries.slice(-Math.ceil(n*0.2)).map(x=>x[0]));
+  return{hot,warm,cold};
+}
+
+function renderBalls(){
+  const t=currentType;if(isNum(t))return;
+  const tp=TYPES[t];const s=state[t];
+  const{hot,warm,cold}=getHotCold(t);
+  const grid=document.getElementById('ball-grid');
+  grid.innerHTML='';
+  for(let i=tp.min;i<=tp.max;i++){
+    const d=document.createElement('div');
+    let cls='ball';
+    if(s.selected.includes(i))cls+=' sel';
+    else if(hot.has(i))cls+=' hot';
+    else if(cold.has(i))cls+=' cold';
+    else if(warm.has(i))cls+=' warm';
+    d.className=cls;d.textContent=i;
+    d.onclick=()=>toggleBall(i);
+    grid.appendChild(d);
+  }
+}
+
+function toggleBall(n){
+  const t=currentType;const s=state[t];const tp=TYPES[t];
+  if(s.selected.includes(n)){s.selected=s.selected.filter(x=>x!==n);}
+  else{
+    if(s.selected.length>=tp.pick){showToast(`${tp.pick}個まで選べます`);return;}
+    s.selected.push(n);s.selected.sort((a,b)=>a-b);
+  }
+  renderBalls();renderSelDisplay();
+}
+
+function renderSelDisplay(){
+  const t=currentType;const s=state[t];
+  const el=document.getElementById('sel-display');
+  if(s.selected.length===0){el.innerHTML='<span style="font-size:12px;color:var(--text3)">番号を選んでください</span>';return;}
+  el.innerHTML=s.selected.map(n=>`<div class="sel-ball">${n}</div>`).join('');
+}
+
+function clearSel(){state[currentType].selected=[];renderBalls();renderSelDisplay();}
+
+function quickPick(){
+  const t=currentType;const tp=TYPES[t];
+  state[t].selected=[];
+  const pool=[];for(let i=tp.min;i<=tp.max;i++)pool.push(i);
+  while(state[t].selected.length<tp.pick){
+    const idx=Math.floor(Math.random()*pool.length);
+    state[t].selected.push(pool.splice(idx,1)[0]);
+  }
+  state[t].selected.sort((a,b)=>a-b);
+  renderBalls();renderSelDisplay();
+  document.getElementById('suggest-box').style.display='none';
+  showToast('ランダムで選びました');
+}
+
+function aiSuggest(){
+  const t=currentType;const tp=TYPES[t];const s=state[t];
+  state[t].selected=[];
+  const entries=Object.entries(s.freq).map(([k,v])=>[+k,v]).sort((a,b)=>b[1]-a[1]);
+  const total=s.histories.length;
+  let pool,method;
+  if(total<3){
+    pool=[];for(let i=tp.min;i<=tp.max;i++)pool.push(i);
+    method='データ不足のためランダム選択';
+  } else {
+    const topN=Math.min(Math.ceil((tp.max-tp.min+1)*0.4),entries.length);
+    pool=entries.slice(0,topN).map(x=>x[0]);
+    method=`出現頻度上位${topN}件から重み付き選択`;
+  }
+  const poolCopy=[...pool];
+  while(state[t].selected.length<tp.pick&&poolCopy.length>0){
+    const idx=Math.floor(Math.random()*poolCopy.length);
+    state[t].selected.push(poolCopy.splice(idx,1)[0]);
+  }
+  state[t].selected.sort((a,b)=>a-b);
+  renderBalls();renderSelDisplay();
+  const box=document.getElementById('suggest-box');
+  document.getElementById('suggest-content').innerHTML=`<div style="font-size:11px;color:var(--text2);margin-bottom:8px">${method}</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">${state[t].selected.map(n=>`<div class="sel-ball" style="width:34px;height:34px;font-size:12px">${n}</div>`).join('')}</div>
+  <div style="font-size:10px;color:var(--text3);margin-top:8px">※確率的な根拠はありません。エンタメ用途でご利用ください。</div>`;
+  box.style.display='block';
+}
+
+// ===== データ追加 =====
+async function addHistoryBall(){
+  const t=currentType;const tp=TYPES[t];
+  const raw=document.getElementById('hist-input').value;
+  const nums=raw.split(/[\s,、]+/).map(x=>+x.trim()).filter(x=>x>=tp.min&&x<=tp.max);
+  const unique=[...new Set(nums)];
+  if(unique.length!==tp.pick){showToast(`${tp.pick}個の番号を入力してください（${tp.min}〜${tp.max}）`);return;}
+  const btn=document.getElementById('btn-add');
+  btn.disabled=true;setSyncStatus('loading');
+  try{
+    const r=await apiPost({action:'add',type:t,numbers:unique});
+    if(!r.ok)throw new Error(r.error);
+    document.getElementById('hist-input').value='';
+    await syncAll();
+    showToast('保存しました');
+  }catch(e){setSyncStatus('err');showToast('保存失敗: '+e.message);}
+  finally{btn.disabled=false;}
+}
+
+async function loadCSV(e){
+  const t=currentType;const tp=TYPES[t];
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async ev=>{
+    const lines=ev.target.result.split(/\r?\n/).filter(l=>l.trim());
+    let added=0;
+    setSyncStatus('loading');
+    for(const line of lines){
+      const nums=line.split(/[,\s]+/).map(x=>+x.trim()).filter(x=>x>=tp.min&&x<=tp.max);
+      const unique=[...new Set(nums)];
+      if(unique.length===tp.pick){
+        try{
+          const r=await apiPost({action:'add',type:t,numbers:unique});
+          if(r.ok)added++;
+        }catch(err){}
+      }
+    }
+    e.target.value='';
+    await syncAll();
+    showToast(`${added}件 インポートしました`);
+  };
+  reader.readAsText(file);
+}
+
+async function removeHist(rowIndex){
+  setSyncStatus('loading');
+  try{
+    const r=await apiPost({action:'delete',type:currentType,rowIndex});
+    if(!r.ok)throw new Error(r.error);
+    await syncAll();
+    showToast('削除しました');
+  }catch(e){setSyncStatus('err');showToast('削除失敗: '+e.message);}
+}
+
+async function clearAll(){
+  if(!confirm('このタイプの全データを消去しますか？'))return;
+  setSyncStatus('loading');
+  try{
+    const r=await apiPost({action:'clear',type:currentType});
+    if(!r.ok)throw new Error(r.error);
+    await syncAll();
+    showToast('全データを消去しました');
+  }catch(e){setSyncStatus('err');showToast('消去失敗: '+e.message);}
+}
+
+// ===== 描画 =====
+function afterUpdate(){
+  updateMetrics();renderHistList();renderFreq();renderBalls();renderSelDisplay();renderChart();
+  renderDigitFreq();renderNumHist();
+}
+
+function renderHistList(){
+  const t=currentType;const s=state[t];
+  const el=document.getElementById('hist-list');
+  if(s.histories.length===0){el.innerHTML='';return;}
+  const show=[...s.histories].reverse().slice(0,10);
+  el.innerHTML=`<div style="font-size:10px;color:var(--text3);margin-bottom:6px">全${s.histories.length}件（直近10件表示）</div>`+
+  show.map((rec,i)=>{
+    const nums=rec.nums||rec;
+    const ts=rec.timestamp?`<span style="font-size:9px;color:var(--text3);margin-left:auto">${rec.timestamp}</span>`:'';
+    return`<div class="hist-row">
+      <span class="h-idx">#${s.histories.length-i}</span>
+      ${nums.map(n=>`<div class="h-ball">${n}</div>`).join('')}
+      ${ts}
+      <button onclick="removeHist(${rec.rowIndex})" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;margin-left:4px">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function renderFreq(){
+  const t=currentType;if(isNum(t))return;
+  const s=state[t];const tp=TYPES[t];
+  const el=document.getElementById('freq-list');
+  if(s.histories.length===0){el.innerHTML='<div style="font-size:12px;color:var(--text3)">データを読み込むと表示されます</div>';return;}
+  const entries=[];
+  for(let i=tp.min;i<=tp.max;i++)entries.push([i,s.freq[i]||0]);
+  entries.sort((a,b)=>b[1]-a[1]);
+  const maxF=entries[0][1]||1;
+  const n=entries.length;
+  const hotIdx=Math.ceil(n*0.2),warmIdx=Math.ceil(n*0.5),coldIdx=n-Math.ceil(n*0.2);
+  el.innerHTML=entries.map(([num,f],i)=>{
+    const pct=Math.round(f/maxF*100);
+    const color=i<hotIdx?'#e84a7a':i<warmIdx?'#e8a44a':i>=coldIdx?'#4a9ae8':'#5a5a80';
+    return`<div class="freq-row">
+      <span class="freq-num">${num}</span>
+      <div class="freq-bar-bg"><div class="freq-bar" style="width:${pct}%;background:${color}"></div></div>
+      <span class="freq-cnt">${f}</span>
+    </div>`;
+  }).join('');
+}
+
+let chartInst=null;
+function renderChart(){
+  const t=currentType;if(isNum(t))return;
+  const s=state[t];const tp=TYPES[t];
+  if(s.histories.length===0){if(chartInst){chartInst.destroy();chartInst=null;}return;}
+  const labels=[],data=[],colors=[];
+  const{hot,warm,cold}=getHotCold(t);
+  for(let i=tp.min;i<=tp.max;i++){
+    labels.push(String(i));data.push(s.freq[i]||0);
+    colors.push(hot.has(i)?'#e84a7a':cold.has(i)?'#4a9ae8':warm.has(i)?'#e8a44a':'#3a3a50');
+  }
+  if(chartInst)chartInst.destroy();
+  const ctx=document.getElementById('freqChart').getContext('2d');
+  chartInst=new Chart(ctx,{
+    type:'bar',
+    data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:0,borderRadius:2}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{title:i=>`番号 ${i[0].label}`,label:i=>`${i.raw}回`}}},
+      scales:{
+        x:{ticks:{font:{size:9},color:'#5a5a70',maxRotation:0,autoSkip:true,maxTicksLimit:20},grid:{display:false}},
+        y:{ticks:{font:{size:10},color:'#5a5a70',stepSize:1},grid:{color:'rgba(255,255,255,0.05)'}}
+      }
+    }
+  });
+}
+
+function updateMetrics(){
+  const t=currentType;const s=state[t];
+  document.getElementById('m-count').textContent=s.histories.length;
+  if(s.histories.length===0){['m-hot','m-cold','m-avg'].forEach(id=>document.getElementById(id).textContent='—');return;}
+  if(isNum(t)){
+    const vals=s.histories.map(x=>+x.nums[0]);
+    document.getElementById('m-avg').textContent=Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+    const dFreq=buildDigitFreq(t);
+    if(dFreq[0]){
+      const sorted=[...dFreq[0]].sort((a,b)=>b[1]-a[1]);
+      document.getElementById('m-hot').textContent=sorted[0][0];
+      document.getElementById('m-cold').textContent=sorted[sorted.length-1][0];
+    }
+  } else {
+    const entries=Object.entries(s.freq).sort((a,b)=>b[1]-a[1]);
+    document.getElementById('m-hot').textContent=entries[0][0];
+    document.getElementById('m-cold').textContent=entries[entries.length-1][0];
+    const all=s.histories.flatMap(x=>x.nums||x);
+    document.getElementById('m-avg').textContent=(all.reduce((a,b)=>a+(+b),0)/all.length).toFixed(1);
+  }
+}
+
+// ===== ナンバーズ系 =====
+async function addHistoryNum(){
+  const t=currentType;const tp=TYPES[t];const digits=tp.digits;
+  const raw=document.getElementById('num-input').value.trim();
+  if(!/^\d+$/.test(raw)||raw.length>digits){showToast(`${digits}桁以内の数字を入力してください`);return;}
+  const padded=raw.padStart(digits,'0');
+  const btn=document.getElementById('btn-add-num');
+  btn.disabled=true;setSyncStatus('loading');
+  try{
+    const r=await apiPost({action:'add',type:t,numbers:[padded]});
+    if(!r.ok)throw new Error(r.error);
+    document.getElementById('num-input').value='';
+    await syncAll();
+    showToast('保存しました');
+  }catch(e){setSyncStatus('err');showToast('保存失敗: '+e.message);}
+  finally{btn.disabled=false;}
+}
+
+async function loadCSVNum(e){
+  const t=currentType;const tp=TYPES[t];const digits=tp.digits;
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async ev=>{
+    const lines=ev.target.result.split(/\r?\n/).filter(l=>l.trim());
+    let added=0;
+    setSyncStatus('loading');
+    for(const line of lines){
+      const raw=line.trim().split(/[,\s]/)[0];
+      if(/^\d{1,4}$/.test(raw)&&raw.length<=digits){
+        try{
+          const r=await apiPost({action:'add',type:t,numbers:[raw.padStart(digits,'0')]});
+          if(r.ok)added++;
+        }catch(err){}
+      }
+    }
+    e.target.value='';
+    await syncAll();
+    showToast(`${added}件 インポートしました`);
+  };
+  reader.readAsText(file);
+}
+
+function renderNumHist(){
+  const t=currentType;const s=state[t];
+  const el=document.getElementById('num-hist-list');
+  if(!el||s.histories.length===0){if(el)el.innerHTML='';return;}
+  const show=[...s.histories].reverse().slice(0,10);
+  el.innerHTML=`<div style="font-size:10px;color:var(--text3);margin-bottom:6px">全${s.histories.length}件（直近10件表示）</div>`+
+  show.map((rec,i)=>`<div class="hist-row">
+    <span class="h-idx">#${s.histories.length-i}</span>
+    <span style="font-family:'Space Mono',monospace;font-size:14px;color:var(--accent);letter-spacing:0.1em">${rec.nums[0]}</span>
+    ${rec.timestamp?`<span style="font-size:9px;color:var(--text3);margin-left:auto">${rec.timestamp}</span>`:''}
+    <button onclick="removeHist(${rec.rowIndex})" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;margin-left:4px">✕</button>
+  </div>`).join('');
+}
+
+function buildDigitFreq(t){
+  const s=state[t];const tp=TYPES[t];const digits=tp.digits;
+  const dFreq=[];
+  for(let d=0;d<digits;d++)dFreq.push(new Map());
+  s.histories.forEach(rec=>{
+    const str=String(rec.nums[0]).padStart(digits,'0');
+    for(let d=0;d<digits;d++){
+      const dig=+str[d];
+      dFreq[d].set(dig,(dFreq[d].get(dig)||0)+1);
+    }
+  });
+  return dFreq;
+}
+
+function renderDigitFreq(){
+  const t=currentType;if(!isNum(t))return;
+  const tp=TYPES[t];
+  const el=document.getElementById('digit-freq');
+  if(state[t].histories.length===0){el.innerHTML='<div style="font-size:12px;color:var(--text3)">データを読み込むと表示されます</div>';return;}
+  const dFreq=buildDigitFreq(t);
+  const digitNames=['1桁目','2桁目','3桁目','4桁目'];
+  el.innerHTML=dFreq.map((map,d)=>{
+    const sorted=[...map.entries()].sort((a,b)=>a[0]-b[0]);
+    const maxF=Math.max(...sorted.map(x=>x[1]),1);
+    return`<div style="margin-bottom:10px">
+      <div style="font-size:10px;color:var(--text3);margin-bottom:4px">${digitNames[d]}</div>
+      ${sorted.map(([digit,cnt])=>`<div class="freq-row">
+        <span class="freq-num">${digit}</span>
+        <div class="freq-bar-bg"><div class="freq-bar" style="width:${Math.round(cnt/maxF*100)}%;background:#e8c84a"></div></div>
+        <span class="freq-cnt">${cnt}</span>
+      </div>`).join('')}
+    </div>`;
+  }).join('');
+}
+
+function numQuickPick(){
+  const t=currentType;const digits=TYPES[t].digits;
+  let num='';for(let i=0;i<digits;i++)num+=Math.floor(Math.random()*10);
+  document.getElementById('num-display').textContent=num;
+  document.getElementById('num-pick-input').value=num;
+  document.getElementById('num-suggest-box').style.display='none';
+  showToast('ランダムで生成しました');
+}
+
+function numAiSuggest(){
+  const t=currentType;const s=state[t];const tp=TYPES[t];const digits=tp.digits;
+  const dFreq=buildDigitFreq(t);
+  let result='',method='';
+  if(s.histories.length<3){
+    for(let i=0;i<digits;i++)result+=Math.floor(Math.random()*10);
+    method='データ不足のためランダム';
+  } else {
+    for(let d=0;d<digits;d++){
+      const entries=[...dFreq[d].entries()].sort((a,b)=>b[1]-a[1]);
+      const top=entries.slice(0,5).map(x=>x[0]);
+      result+=top[Math.floor(Math.random()*top.length)];
+    }
+    method='各桁の出現頻度上位5件から選択';
+  }
+  document.getElementById('num-display').textContent=result;
+  document.getElementById('num-pick-input').value=result;
+  const box=document.getElementById('num-suggest-box');
+  document.getElementById('num-suggest-content').innerHTML=`<div style="font-size:11px;color:var(--text2);margin-bottom:4px">${method}</div>
+  <div style="font-size:10px;color:var(--text3)">※エンタメ用途です。確率的優位性はありません。</div>`;
+  box.style.display='block';
+}
+
+document.getElementById('num-pick-input').addEventListener('input',e=>{
+  const v=e.target.value.trim();
+  if(v)document.getElementById('num-display').textContent=v;
+});
+
+function showToast(msg){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.style.opacity='1';
+  setTimeout(()=>el.style.opacity='0',2500);
+}
+</script>
+</body>
+</html>
