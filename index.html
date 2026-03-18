@@ -1,340 +1,857 @@
-// ===================================================
-// LOTTERY ANALYZER - GAS Backend (セキュリティ強化版)
-// ===================================================
-
-// ===== 設定（GASプロパティストアで管理） =====
-// 初回セットアップ時に initConfig() を手動実行してください
-
-const SHEET_NAMES = ['loto6', 'loto7', 'miniloto', 'num3', 'num4'];
-const MAX_ATTEMPTS   = 5;    // ログイン失敗上限
-const LOCK_MINUTES   = 15;   // ロック時間（分）
-const RATE_LIMIT_MAX = 30;   // 1分間の最大リクエスト数
-const TOKEN_EXPIRE_H = 24;   // セッショントークン有効時間（時間）
-
-// ===== エントリポイント =====
-function doPost(e) {
-  try {
-    enforceHttps(e);
-    const body = JSON.parse(e.postData.contents);
-    const clientId = getClientId(e);
-
-    // レート制限チェック
-    const rateCheck = checkRateLimit(clientId);
-    if (!rateCheck.ok) return res({ ok: false, error: rateCheck.error }, 429);
-
-    // ログインアクション
-    if (body.action === 'login') return res(handleLogin(body.loginId, body.password, clientId));
-
-    // その他のアクションはトークン認証
-    const authCheck = verifyToken(body.token);
-    if (!authCheck.ok) return res({ ok: false, error: authCheck.error }, 401);
-
-    if (body.action === 'add')    return res(addRecord(body.type, body.numbers));
-    if (body.action === 'delete') return res(deleteRecord(body.type, body.rowIndex));
-    if (body.action === 'clear')  return res(clearSheet(body.type));
-    if (body.action === 'logout') return res(handleLogout(body.token));
-
-    return res({ ok: false, error: '不明なアクション' });
-  } catch (err) {
-    Logger.log('doPost error: ' + err.message);
-    return res({ ok: false, error: 'サーバーエラーが発生しました' }, 500);
-  }
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LOTTERY ANALYZER</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0f;--surface:#13131a;--surface2:#1c1c26;--surface3:#242430;
+  --accent:#e8c84a;--accent2:#4ae8b0;--accent3:#e84a7a;
+  --text:#f0f0f8;--text2:#9090a8;--text3:#5a5a70;
+  --border:#2a2a38;--radius:10px;
 }
+html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:'Noto Sans JP',sans-serif}
+.app{max-width:900px;margin:0 auto;padding:16px}
 
-function doGet(e) {
-  try {
-    enforceHttps(e);
-    const clientId = getClientId(e);
+/* ログイン */
+#login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px}
+#login-screen h1{font-family:'Space Mono',monospace;color:var(--accent);font-size:22px;letter-spacing:0.1em}
+#login-screen p{font-size:12px;color:var(--text3)}
+.login-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:28px 32px;width:100%;max-width:360px;display:flex;flex-direction:column;gap:12px}
+.login-card label{font-size:11px;color:var(--text3);letter-spacing:0.05em}
+.login-card input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'Noto Sans JP',sans-serif;font-size:14px;padding:10px 12px;outline:none;transition:border-color 0.2s}
+.login-card input:focus{border-color:var(--accent)}
+.login-err{font-size:11px;color:var(--accent3);min-height:16px;padding:2px 0}
+.lock-notice{background:#e84a7a18;border:1px solid #e84a7a44;border-radius:6px;padding:10px 12px;font-size:11px;color:#e84a7a;display:none;line-height:1.6}
+.attempt-bar{display:none;gap:4px;align-items:center}
+.attempt-dot{width:8px;height:8px;border-radius:50%;background:var(--border)}
+.attempt-dot.used{background:var(--accent3)}
 
-    const rateCheck = checkRateLimit(clientId);
-    if (!rateCheck.ok) return res({ ok: false, error: rateCheck.error }, 429);
+/* ヘッダー */
+.header{display:flex;align-items:center;justify-content:space-between;padding:16px 0 20px;flex-wrap:wrap;gap:8px}
+.header h1{font-family:'Space Mono',monospace;font-size:clamp(15px,3.5vw,22px);letter-spacing:0.08em;color:var(--accent);font-weight:700}
+.header-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sync-status{font-size:10px;padding:4px 10px;border-radius:12px;border:1px solid var(--border);color:var(--text3);font-family:'Space Mono',monospace;white-space:nowrap}
+.sync-status.ok{border-color:#4ae8b0;color:#4ae8b0}
+.sync-status.err{border-color:var(--accent3);color:var(--accent3)}
+.sync-status.loading{border-color:var(--accent);color:var(--accent)}
+.session-timer{font-size:10px;color:var(--text3);font-family:'Space Mono',monospace}
 
-    const token = e.parameter.token;
-    const type  = e.parameter.type;
+/* タブ */
+.type-tabs{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:20px}
+.type-tab{padding:7px 14px;border-radius:20px;border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:12px;font-family:'Space Mono',monospace;cursor:pointer;transition:all 0.2s;white-space:nowrap}
+.type-tab:hover{border-color:var(--accent);color:var(--accent)}
+.type-tab.active{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700}
 
-    const authCheck = verifyToken(token);
-    if (!authCheck.ok) return res({ ok: false, error: authCheck.error }, 401);
-    if (!type) return res({ ok: false, error: 'typeが必要です' });
+/* メトリクス */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
+.metric{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px}
+.metric-label{font-size:10px;color:var(--text3);letter-spacing:0.05em;margin-bottom:4px}
+.metric-val{font-size:20px;font-weight:700;font-family:'Space Mono',monospace;color:var(--accent)}
+@media(max-width:600px){.metrics{grid-template-columns:repeat(2,1fr)}}
 
-    return res(getRecords(type));
-  } catch (err) {
-    Logger.log('doGet error: ' + err.message);
-    return res({ ok: false, error: 'サーバーエラーが発生しました' }, 500);
-  }
+/* グリッド */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+@media(max-width:600px){.grid2{grid-template-columns:1fr}}
+
+/* カード */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.card-title{font-size:11px;color:var(--text3);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;font-family:'Space Mono',monospace}
+
+/* 入力 */
+input[type=text],input[type=password]{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'Noto Sans JP',sans-serif;font-size:13px;padding:8px 10px;outline:none;transition:border-color 0.2s}
+input[type=text]:focus,input[type=password]:focus{border-color:var(--accent)}
+
+/* ボタン */
+.btn{cursor:pointer;border-radius:6px;font-family:'Noto Sans JP',sans-serif;font-size:12px;padding:8px 14px;border:1px solid var(--border);background:var(--surface2);color:var(--text2);transition:all 0.15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn:active{transform:scale(0.97)}
+.btn:disabled{opacity:0.4;cursor:not-allowed;transform:none}
+.btn.accent{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700}
+.btn.accent:hover{background:#f0d060}
+.btn.green{background:var(--accent2);border-color:var(--accent2);color:#000;font-weight:700}
+.btn.green:hover{background:#60f0c0}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+/* ボール */
+.balls-wrap{display:flex;flex-wrap:wrap;gap:6px}
+.ball{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-family:'Space Mono',monospace;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text2);transition:all 0.15s;user-select:none}
+.ball:hover{border-color:var(--accent);color:var(--accent)}
+.ball.sel{background:var(--accent);border-color:var(--accent);color:#000}
+.ball.hot{border-color:#e84a7a;color:#e84a7a}
+.ball.warm{border-color:#e8a44a;color:#e8a44a}
+.ball.cold{border-color:#4a9ae8;color:#4a9ae8}
+.ball.sel.hot,.ball.sel.warm,.ball.sel.cold{background:var(--accent);border-color:var(--accent);color:#000}
+@media(max-width:400px){.ball{width:32px;height:32px;font-size:11px}}
+
+.sel-row{display:flex;gap:8px;flex-wrap:wrap;min-height:44px;align-items:center;padding:10px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);margin-top:10px}
+.sel-ball{width:40px;height:40px;border-radius:50%;background:var(--accent);color:#000;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:'Space Mono',monospace}
+
+.freq-list{max-height:300px;overflow-y:auto;padding-right:4px}
+.freq-list::-webkit-scrollbar{width:3px}
+.freq-list::-webkit-scrollbar-thumb{background:var(--border)}
+.freq-row{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.freq-num{font-size:11px;font-family:'Space Mono',monospace;min-width:32px;text-align:right;color:var(--text2)}
+.freq-bar-bg{flex:1;height:8px;background:var(--surface3);border-radius:4px;overflow:hidden}
+.freq-bar{height:100%;border-radius:4px;transition:width 0.4s}
+.freq-cnt{font-size:10px;color:var(--text3);min-width:20px}
+
+.hist-row{display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--border)}
+.hist-row:last-child{border-bottom:none}
+.h-ball{width:26px;height:26px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:10px;font-family:'Space Mono',monospace;color:var(--text2)}
+.h-idx{font-size:10px;color:var(--text3);min-width:28px;font-family:'Space Mono',monospace}
+.hist-scroll{max-height:220px;overflow-y:auto}
+
+.suggest-box{background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);padding:12px;margin-top:10px;display:none}
+.suggest-title{font-size:10px;color:var(--accent);letter-spacing:0.1em;margin-bottom:8px;font-family:'Space Mono',monospace}
+
+.num-display{font-family:'Space Mono',monospace;font-size:clamp(32px,8vw,52px);font-weight:700;color:var(--accent);letter-spacing:0.15em;text-align:center;padding:16px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);margin:10px 0}
+
+.leg{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text3)}
+.leg-dot{width:8px;height:8px;border-radius:50%}
+.csv-hint{font-size:10px;color:var(--text3);margin-top:6px;line-height:1.6}
+.chart-wrap{position:relative;width:100%;height:200px}
+
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:4px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--accent);color:#000;padding:8px 20px;border-radius:20px;font-size:12px;font-weight:700;opacity:0;transition:opacity 0.3s;pointer-events:none;z-index:999;white-space:nowrap}
+#toast.err{background:var(--accent3);color:#fff}
+</style>
+</head>
+<body>
+
+<!-- ログイン画面 -->
+<div id="login-screen">
+  <h1>LOTTERY ANALYZER</h1>
+  <p>ログインIDとパスワードを入力してください</p>
+  <div class="login-card">
+    <label>GAS API URL</label>
+    <input type="text" id="api-url-input" placeholder="https://script.google.com/macros/s/..." autocomplete="off" />
+    <label>ログインID</label>
+    <input type="text" id="loginid-input" placeholder="ログインID" autocomplete="username" />
+    <label>パスワード</label>
+    <input type="password" id="pw-input" placeholder="••••••••" autocomplete="current-password" />
+    <div class="attempt-bar" id="attempt-bar"></div>
+    <div class="lock-notice" id="lock-notice"></div>
+    <div class="login-err" id="login-err"></div>
+    <button class="btn accent" id="login-btn" onclick="login()">ログイン</button>
+    <div style="font-size:10px;color:var(--text3);line-height:1.6">
+      URLとログイン情報はこのブラウザに保存されます<br>
+      セッションは24時間有効です
+    </div>
+  </div>
+</div>
+
+<!-- メイン画面 -->
+<div id="main-screen" style="display:none">
+<div class="app">
+  <div class="header">
+    <h1>LOTTERY ANALYZER</h1>
+    <div class="header-right">
+      <span class="session-timer" id="session-timer"></span>
+      <span class="sync-status" id="sync-status">—</span>
+      <button class="btn" onclick="syncAll()" style="font-size:11px;padding:5px 10px">↺ 同期</button>
+      <button class="btn" onclick="logout()" style="font-size:11px;padding:5px 10px;color:#e84a7a;border-color:#e84a7a30">ログアウト</button>
+    </div>
+  </div>
+
+  <div class="type-tabs">
+    <button class="type-tab active" onclick="setType('loto6')">ロト6</button>
+    <button class="type-tab" onclick="setType('loto7')">ロト7</button>
+    <button class="type-tab" onclick="setType('miniloto')">ミニロト</button>
+    <button class="type-tab" onclick="setType('num3')">ナンバーズ3</button>
+    <button class="type-tab" onclick="setType('num4')">ナンバーズ4</button>
+  </div>
+
+  <div class="metrics">
+    <div class="metric"><div class="metric-label">記録数</div><div class="metric-val" id="m-count">0</div></div>
+    <div class="metric"><div class="metric-label">最頻出</div><div class="metric-val" id="m-hot">—</div></div>
+    <div class="metric"><div class="metric-label">最少出現</div><div class="metric-val" id="m-cold">—</div></div>
+    <div class="metric"><div class="metric-label">平均</div><div class="metric-val" id="m-avg">—</div></div>
+  </div>
+
+  <!-- ロト系パネル -->
+  <div id="panel-ball">
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">番号入力 / CSV取込</div>
+        <input type="text" id="hist-input" placeholder="例: 3 14 25 31 38 43" />
+        <div class="btn-row">
+          <button class="btn accent" id="btn-add" onclick="addHistoryBall()">追加</button>
+          <button class="btn" onclick="document.getElementById('csv-file').click()">CSV</button>
+          <input type="file" id="csv-file" accept=".csv,.txt" style="display:none" onchange="loadCSV(event)"/>
+          <button class="btn" onclick="clearAll()" style="color:#e84a7a;border-color:#e84a7a30">全消去</button>
+        </div>
+        <div class="csv-hint">CSV: 1行にカンマ区切りで番号（複数行OK）</div>
+        <div class="hist-scroll" style="margin-top:10px"><div id="hist-list"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">出現頻度</div>
+        <div class="leg">
+          <div class="leg-item"><div class="leg-dot" style="background:#e84a7a"></div>上位20%</div>
+          <div class="leg-item"><div class="leg-dot" style="background:#e8a44a"></div>上位50%</div>
+          <div class="leg-item"><div class="leg-dot" style="background:#4a9ae8"></div>下位20%</div>
+        </div>
+        <div class="freq-list" id="freq-list"><div style="font-size:12px;color:var(--text3)">データを読み込むと表示されます</div></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">番号を選ぶ</div>
+      <div class="balls-wrap" id="ball-grid"></div>
+      <div class="sel-row" id="sel-display"><span style="font-size:12px;color:var(--text3)">番号を選んでください</span></div>
+      <div class="btn-row">
+        <button class="btn accent" onclick="quickPick()">クイックピック</button>
+        <button class="btn green" onclick="aiSuggest()">AI提案</button>
+        <button class="btn" onclick="clearSel()">クリア</button>
+      </div>
+      <div class="suggest-box" id="suggest-box">
+        <div class="suggest-title">AI SUGGESTION</div>
+        <div id="suggest-content"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">グラフ</div>
+      <div class="chart-wrap"><canvas id="freqChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ナンバーズパネル -->
+  <div id="panel-num" style="display:none">
+    <div class="grid2">
+      <div class="card">
+        <div class="card-title">当選番号入力 / CSV取込</div>
+        <input type="text" id="num-input" placeholder="例: 456" />
+        <div class="btn-row">
+          <button class="btn accent" id="btn-add-num" onclick="addHistoryNum()">追加</button>
+          <button class="btn" onclick="document.getElementById('csv-file-num').click()">CSV</button>
+          <input type="file" id="csv-file-num" accept=".csv,.txt" style="display:none" onchange="loadCSVNum(event)"/>
+          <button class="btn" onclick="clearAll()" style="color:#e84a7a;border-color:#e84a7a30">全消去</button>
+        </div>
+        <div class="csv-hint">CSV: 1行1番号（例: 456）</div>
+        <div class="hist-scroll" style="margin-top:10px"><div id="num-hist-list"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">桁別 出現頻度 (0〜9)</div>
+        <div id="digit-freq"><div style="font-size:12px;color:var(--text3)">データを読み込むと表示されます</div></div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">番号を選ぶ</div>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="num-pick-input" style="max-width:140px;font-family:'Space Mono',monospace;font-size:18px;text-align:center" placeholder="---" />
+        <button class="btn accent" onclick="numQuickPick()">クイックピック</button>
+        <button class="btn green" onclick="numAiSuggest()">AI提案</button>
+      </div>
+      <div class="num-display" id="num-display">—</div>
+      <div class="suggest-box" id="num-suggest-box">
+        <div class="suggest-title">AI SUGGESTION</div>
+        <div id="num-suggest-content"></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+// ===== 定数 =====
+const TYPES={
+  loto6:{label:'ロト6',min:1,max:43,pick:6},
+  loto7:{label:'ロト7',min:1,max:37,pick:7},
+  miniloto:{label:'ミニロト',min:1,max:31,pick:5},
+  num3:{label:'ナンバーズ3',digits:3},
+  num4:{label:'ナンバーズ4',digits:4},
+};
+const TOKEN_KEY   = 'lottery_token';
+const APIURL_KEY  = 'lottery_api_url';
+const EXPIRE_KEY  = 'lottery_token_expire';
+const TOKEN_HOURS = 24;
+
+let API_URL      = '';
+let SESSION_TOKEN= '';
+let currentType  = 'loto6';
+let state        = {};
+let sessionTimer = null;
+
+for(const k in TYPES) state[k]={histories:[],freq:{},selected:[]};
+function isNum(t){return t==='num3'||t==='num4'}
+
+function initFreq(t){
+  state[t].freq={};
+  const tp=TYPES[t];
+  if(isNum(t)){const max=t==='num3'?1000:10000;for(let i=0;i<max;i++)state[t].freq[i]=0;}
+  else{for(let i=tp.min;i<=tp.max;i++)state[t].freq[i]=0;}
 }
-
-// ===== HTTPS強制 =====
-function enforceHttps(e) {
-  // GAS Web AppはデフォルトでHTTPS。念のため記録のみ
-  // (GAS環境ではリクエストプロトコルの直接取得は不可のため、
-  //  デプロイ設定でHTTPSを強制することを推奨)
-}
+Object.keys(TYPES).forEach(initFreq);
 
 // ===== 認証 =====
-function handleLogin(loginId, password, clientId) {
-  // ロックチェック
-  const lockCheck = checkLock(clientId);
-  if (!lockCheck.ok) return { ok: false, error: lockCheck.error };
+async function login(){
+  const url      = document.getElementById('api-url-input').value.trim();
+  const loginId  = document.getElementById('loginid-input').value.trim();
+  const pw       = document.getElementById('pw-input').value.trim();
+  const err      = document.getElementById('login-err');
+  if(!url||!loginId||!pw){err.textContent='URL・ログインID・パスワードをすべて入力してください';return;}
 
-  const props       = PropertiesService.getScriptProperties();
-  const storedIdHash  = props.getProperty('LOGINID_HASH');
-  const storedPwHash  = props.getProperty('PASSWORD_HASH');
-  const inputIdHash   = sha256(loginId);
-  const inputPwHash   = sha256(password);
+  const btn = document.getElementById('login-btn');
+  btn.disabled=true;btn.textContent='確認中...';err.textContent='';
 
-  // IDとパスワードを両方照合（どちらが違っても同じメッセージで返す）
-  if (inputIdHash !== storedIdHash || inputPwHash !== storedPwHash) {
-    recordFailure(clientId);
-    const remaining = getRemainingAttempts(clientId);
-    return { ok: false, error: `IDまたはパスワードが違います（残り${remaining}回）`, remaining };
-  }
-
-  // 成功 → 失敗カウントリセット・トークン発行
-  resetFailures(clientId);
-  const token = issueToken(clientId);
-  return { ok: true, token };
-}
-
-function handleLogout(token) {
-  const cache = CacheService.getScriptCache();
-  cache.remove('token_' + token);
-  return { ok: true };
-}
-
-// ===== トークン管理 =====
-function issueToken(clientId) {
-  const token  = Utilities.getUuid();
-  const expire = new Date().getTime() + TOKEN_EXPIRE_H * 3600 * 1000;
-  const cache  = CacheService.getScriptCache();
-  cache.put('token_' + token, JSON.stringify({ clientId, expire }), TOKEN_EXPIRE_H * 3600);
-  return token;
-}
-
-function verifyToken(token) {
-  if (!token) return { ok: false, error: '認証が必要です。再ログインしてください' };
-  const cache = CacheService.getScriptCache();
-  const data  = cache.get('token_' + token);
-  if (!data)  return { ok: false, error: 'セッションが期限切れです。再ログインしてください' };
-  const parsed = JSON.parse(data);
-  if (new Date().getTime() > parsed.expire) {
-    cache.remove('token_' + token);
-    return { ok: false, error: 'セッションが期限切れです。再ログインしてください' };
-  }
-  return { ok: true };
-}
-
-// ===== ロック管理 =====
-function checkLock(clientId) {
-  const cache   = CacheService.getScriptCache();
-  const lockKey = 'lock_' + clientId;
-  const locked  = cache.get(lockKey);
-  if (locked) {
-    return { ok: false, error: `ログイン試行回数が上限を超えました。${LOCK_MINUTES}分後に再試行してください` };
-  }
-  return { ok: true };
-}
-
-function recordFailure(clientId) {
-  const cache      = CacheService.getScriptCache();
-  const key        = 'fail_' + clientId;
-  const current    = parseInt(cache.get(key) || '0') + 1;
-  cache.put(key, String(current), LOCK_MINUTES * 60);
-  if (current >= MAX_ATTEMPTS) {
-    cache.put('lock_' + clientId, '1', LOCK_MINUTES * 60);
-    cache.remove(key);
-    Logger.log('アカウントロック: ' + clientId);
+  try{
+    API_URL = url;
+    const ua = navigator.userAgent;
+    const r  = await apiPost({action:'login', loginId, password:pw, ua});
+    if(!r.ok){
+      err.textContent = r.error || 'ログインに失敗しました';
+      updateAttemptBar(r.remaining);
+      if(r.locked) showLockNotice();
+      return;
+    }
+    // トークン保存
+    SESSION_TOKEN = r.token;
+    const expire  = new Date().getTime() + TOKEN_HOURS * 3600 * 1000;
+    localStorage.setItem(TOKEN_KEY,  SESSION_TOKEN);
+    localStorage.setItem(APIURL_KEY, url);
+    localStorage.setItem(EXPIRE_KEY, String(expire));
+    showMain();
+    syncAll();
+    startSessionTimer(expire);
+  }catch(e){
+    err.textContent = 'サーバーに接続できませんでした。URLを確認してください';
+  }finally{
+    btn.disabled=false;btn.textContent='ログイン';
   }
 }
 
-function resetFailures(clientId) {
-  const cache = CacheService.getScriptCache();
-  cache.remove('fail_' + clientId);
-  cache.remove('lock_' + clientId);
+function updateAttemptBar(remaining){
+  const bar = document.getElementById('attempt-bar');
+  if(remaining === undefined) return;
+  bar.style.display='flex';
+  const used = 5 - remaining;
+  bar.innerHTML = Array.from({length:5},(_,i)=>
+    `<div class="attempt-dot ${i<used?'used':''}"></div>`
+  ).join('') + `<span style="font-size:10px;color:var(--text3);margin-left:4px">残り${remaining}回</span>`;
 }
 
-function getRemainingAttempts(clientId) {
-  const cache   = CacheService.getScriptCache();
-  const current = parseInt(cache.get('fail_' + clientId) || '0');
-  return Math.max(0, MAX_ATTEMPTS - current);
+function showLockNotice(){
+  const el = document.getElementById('lock-notice');
+  el.style.display='block';
+  el.textContent = `ログイン試行回数が上限を超えました。15分間ロックされています。`;
 }
 
-// ===== レート制限 =====
-function checkRateLimit(clientId) {
-  const cache = CacheService.getScriptCache();
-  const key   = 'rate_' + clientId;
-  const count = parseInt(cache.get(key) || '0');
-  if (count >= RATE_LIMIT_MAX) {
-    return { ok: false, error: 'リクエストが多すぎます。しばらく待ってから再試行してください' };
+async function logout(){
+  if(SESSION_TOKEN){
+    try{ await apiPost({action:'logout',token:SESSION_TOKEN}); }catch(e){}
   }
-  cache.put(key, String(count + 1), 60); // 60秒でリセット
-  return { ok: true };
+  clearSession();
 }
 
-// ===== クライアントID取得 =====
-function getClientId(e) {
-  // GASはIPを直接取得できないため、User-AgentとタイムスタンプのハッシュでID生成
-  const ua = (e.parameter && e.parameter.ua) || 'unknown';
-  return sha256(ua).substring(0, 16);
+function clearSession(){
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(EXPIRE_KEY);
+  SESSION_TOKEN='';API_URL='';
+  if(sessionTimer) clearInterval(sessionTimer);
+  document.getElementById('main-screen').style.display='none';
+  document.getElementById('login-screen').style.display='flex';
+  document.getElementById('loginid-input').value='';
+  document.getElementById('pw-input').value='';
+  document.getElementById('login-err').textContent='';
+  document.getElementById('attempt-bar').style.display='none';
+  document.getElementById('lock-notice').style.display='none';
 }
 
-// ===== SHA-256 ハッシュ =====
-function sha256(input) {
-  const bytes  = Utilities.computeDigest(
-    Utilities.DigestAlgorithm.SHA_256,
-    input,
-    Utilities.Charset.UTF_8
-  );
-  return bytes.map(b => ('0' + (b & 0xFF).toString(16)).slice(-2)).join('');
+function showMain(){
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('main-screen').style.display='block';
+  renderBalls();
 }
 
-// ===== シート操作 =====
-function getSheet(type) {
-  const props = PropertiesService.getScriptProperties();
-  const id    = props.getProperty('SHEET_ID');
-  if (!id) throw new Error('SHEET_IDが設定されていません。initConfig()を実行してください');
-  const ss    = SpreadsheetApp.openById(id);
-  let   sheet = ss.getSheetByName(type);
-  if (!sheet) {
-    sheet = ss.insertSheet(type);
-    sheet.appendRow(['timestamp', 'numbers']);
-    sheet.setFrozenRows(1);
+function startSessionTimer(expire){
+  if(sessionTimer) clearInterval(sessionTimer);
+  const el = document.getElementById('session-timer');
+  sessionTimer = setInterval(()=>{
+    const left = expire - new Date().getTime();
+    if(left <= 0){ clearInterval(sessionTimer); clearSession(); showToast('セッションが期限切れです',true); return; }
+    const h = Math.floor(left/3600000);
+    const m = Math.floor((left%3600000)/60000);
+    el.textContent = `セッション残り ${h}h${m}m`;
+  }, 30000);
+}
+
+// 自動ログイン復元
+window.addEventListener('load',()=>{
+  const token  = localStorage.getItem(TOKEN_KEY);
+  const url    = localStorage.getItem(APIURL_KEY);
+  const expire = parseInt(localStorage.getItem(EXPIRE_KEY)||'0');
+  if(token && url && new Date().getTime() < expire){
+    API_URL=url; SESSION_TOKEN=token;
+    document.getElementById('api-url-input').value=url;
+    showMain();
+    syncAll();
+    startSessionTimer(expire);
   }
-  return sheet;
+});
+
+// Enterキーでログイン
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter' && document.getElementById('login-screen').style.display!=='none') login();
+});
+
+// ===== API通信 =====
+function setSyncStatus(s){
+  const el=document.getElementById('sync-status');
+  if(s==='loading'){el.className='sync-status loading';el.innerHTML='<span class="spinner"></span>同期中';}
+  else if(s==='ok'){el.className='sync-status ok';el.textContent='✓ 同期済み';}
+  else{el.className='sync-status err';el.textContent='✗ エラー';}
 }
 
-function getRecords(type) {
-  const sheet = getSheet(type);
-  const rows  = sheet.getDataRange().getValues();
-  if (rows.length <= 1) return { ok: true, records: [] };
-  const records = rows.slice(1).map((row, i) => ({
-    rowIndex : i + 2,
-    timestamp: row[0],
-    numbers  : String(row[1]).split(',').map(x => x.trim())
-  }));
-  return { ok: true, records };
+async function apiGet(type){
+  const url=`${API_URL}?token=${encodeURIComponent(SESSION_TOKEN)}&type=${type}&ua=${encodeURIComponent(navigator.userAgent.substring(0,50))}`;
+  const r=await fetch(url);
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  const data=await r.json();
+  if(!data.ok && (data.error||'').includes('セッション')){clearSession();showToast('セッション切れです。再ログインしてください',true);}
+  return data;
 }
 
-function addRecord(type, numbers) {
-  if (!numbers || !Array.isArray(numbers) || numbers.length === 0) {
-    return { ok: false, error: '番号データが不正です' };
+async function apiPost(body){
+  const payload={...body};
+  if(SESSION_TOKEN && !payload.token) payload.token=SESSION_TOKEN;
+  if(!payload.ua) payload.ua=navigator.userAgent.substring(0,50);
+  const r=await fetch(API_URL,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)
+  });
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  const data=await r.json();
+  if(!data.ok && (data.error||'').includes('セッション')){clearSession();showToast('セッション切れです。再ログインしてください',true);}
+  return data;
+}
+
+// ===== 同期 =====
+async function syncAll(){
+  setSyncStatus('loading');
+  try{
+    const data=await apiGet(currentType);
+    if(!data.ok) throw new Error(data.error);
+    loadRecords(currentType,data.records);
+    setSyncStatus('ok');
+  }catch(e){
+    setSyncStatus('err');
+    showToast('同期失敗: '+e.message,true);
   }
-  // 入力バリデーション
-  const sanitized = numbers.map(n => String(n).replace(/[^0-9]/g, ''));
-  const sheet = getSheet(type);
-  sheet.appendRow([new Date().toLocaleString('ja-JP'), sanitized.join(',')]);
-  return { ok: true };
 }
 
-function deleteRecord(type, rowIndex) {
-  if (!rowIndex || isNaN(rowIndex)) return { ok: false, error: 'rowIndexが不正です' };
-  const sheet = getSheet(type);
-  const last  = sheet.getLastRow();
-  const row   = Number(rowIndex);
-  if (row < 2 || row > last) return { ok: false, error: '行番号が範囲外です' };
-  sheet.deleteRow(row);
-  return { ok: true };
+function loadRecords(type,records){
+  initFreq(type);
+  state[type].histories=[];
+  records.forEach(rec=>{
+    const nums=rec.numbers.map(x=>isNum(type)?x:+x);
+    state[type].histories.push({nums,rowIndex:rec.rowIndex,timestamp:rec.timestamp});
+    if(!isNum(type)){
+      nums.forEach(n=>state[type].freq[+n]=(state[type].freq[+n]||0)+1);
+    } else {
+      const n=+rec.numbers[0];
+      state[type].freq[n]=(state[type].freq[n]||0)+1;
+    }
+  });
+  afterUpdate();
 }
 
-function clearSheet(type) {
-  const sheet = getSheet(type);
-  const last  = sheet.getLastRow();
-  if (last > 1) sheet.deleteRows(2, last - 1);
-  return { ok: true };
+// ===== タイプ切替 =====
+function setType(t){
+  currentType=t;
+  document.querySelectorAll('.type-tab').forEach((el,i)=>{
+    el.classList.toggle('active',Object.keys(TYPES)[i]===t);
+  });
+  const num=isNum(t);
+  document.getElementById('panel-ball').style.display=num?'none':'block';
+  document.getElementById('panel-num').style.display=num?'block':'none';
+  if(!num){renderBalls();renderFreq();renderChart();}
+  else{renderDigitFreq();renderNumHist();}
+  updateMetrics();
+  syncAll();
 }
 
-// ===== レスポンス =====
-function res(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
+// ===== ボール系 =====
+function getHotCold(t){
+  const f=state[t].freq;const tp=TYPES[t];
+  const entries=[];
+  for(let i=tp.min;i<=tp.max;i++) entries.push([i,f[i]||0]);
+  entries.sort((a,b)=>b[1]-a[1]);
+  const n=entries.length;
+  const hot =new Set(entries.slice(0,Math.ceil(n*0.2)).map(x=>x[0]));
+  const warm=new Set(entries.slice(0,Math.ceil(n*0.5)).map(x=>x[0]));
+  const cold=new Set(entries.slice(-Math.ceil(n*0.2)).map(x=>x[0]));
+  return{hot,warm,cold};
 }
 
-// ===== 初期設定（初回のみ手動実行） =====
-function initConfig() {
-  const ui = SpreadsheetApp.getUi();
-
-  // スプレッドシートID
-  const sheetRes = ui.prompt(
-    '初期設定 (1/4)',
-    'スプレッドシートIDを入力してください\n（URLの /d/★ここ★/edit 部分）',
-    ui.ButtonSet.OK_CANCEL
-  );
-  if (sheetRes.getSelectedButton() !== ui.Button.OK) return;
-  const sheetId = sheetRes.getResponseText().trim();
-
-  // ログインID
-  const idRes = ui.prompt(
-    '初期設定 (2/4)',
-    '使用するログインIDを入力してください',
-    ui.ButtonSet.OK_CANCEL
-  );
-  if (idRes.getSelectedButton() !== ui.Button.OK) return;
-  const loginId = idRes.getResponseText().trim();
-
-  // パスワード
-  const pwRes = ui.prompt(
-    '初期設定 (3/4)',
-    '使用するパスワードを入力してください',
-    ui.ButtonSet.OK_CANCEL
-  );
-  if (pwRes.getSelectedButton() !== ui.Button.OK) return;
-  const password = pwRes.getResponseText().trim();
-
-  // 確認
-  const confirmRes = ui.prompt(
-    '初期設定 (4/4) - 確認',
-    `以下の内容で設定します。よろしいですか？\n\nスプレッドシートID: ${sheetId}\nログインID: ${loginId}\nパスワード: ${'*'.repeat(password.length)}\n\n「OK」と入力して確定してください`,
-    ui.ButtonSet.OK_CANCEL
-  );
-  if (confirmRes.getSelectedButton() !== ui.Button.OK) return;
-
-  if (!sheetId || !loginId || !password) {
-    ui.alert('入力が空です。やり直してください。');
-    return;
+function renderBalls(){
+  const t=currentType;if(isNum(t))return;
+  const tp=TYPES[t];const s=state[t];
+  const{hot,warm,cold}=getHotCold(t);
+  const grid=document.getElementById('ball-grid');
+  grid.innerHTML='';
+  for(let i=tp.min;i<=tp.max;i++){
+    const d=document.createElement('div');
+    let cls='ball';
+    if(s.selected.includes(i))cls+=' sel';
+    else if(hot.has(i)) cls+=' hot';
+    else if(cold.has(i))cls+=' cold';
+    else if(warm.has(i))cls+=' warm';
+    d.className=cls;d.textContent=i;
+    d.onclick=()=>toggleBall(i);
+    grid.appendChild(d);
   }
-
-  // プロパティストアに保存（コードに直書きしない）
-  const props = PropertiesService.getScriptProperties();
-  props.setProperty('SHEET_ID',      sheetId);
-  props.setProperty('LOGINID_HASH',  sha256(loginId));
-  props.setProperty('PASSWORD_HASH', sha256(password));
-
-  // シート初期化
-  SHEET_NAMES.forEach(name => getSheet(name));
-
-  ui.alert('✅ 初期設定が完了しました！\n\nWeb Appとしてデプロイしてください。');
-  Logger.log('initConfig完了 - SHEET_ID: ' + sheetId);
 }
 
-// ===== ログインID変更 =====
-function changeLoginId() {
-  const ui = SpreadsheetApp.getUi();
-  const r = ui.prompt('ログインID変更', '新しいログインIDを入力してください', ui.ButtonSet.OK_CANCEL);
-  if (r.getSelectedButton() !== ui.Button.OK) return;
-  const newId = r.getResponseText().trim();
-  if (!newId) { ui.alert('IDが空です'); return; }
-  PropertiesService.getScriptProperties().setProperty('LOGINID_HASH', sha256(newId));
-  ui.alert('✅ ログインIDを変更しました');
+function toggleBall(n){
+  const t=currentType;const s=state[t];const tp=TYPES[t];
+  if(s.selected.includes(n)){s.selected=s.selected.filter(x=>x!==n);}
+  else{
+    if(s.selected.length>=tp.pick){showToast(`${tp.pick}個まで選べます`);return;}
+    s.selected.push(n);s.selected.sort((a,b)=>a-b);
+  }
+  renderBalls();renderSelDisplay();
 }
 
-// ===== パスワード変更 =====
-function changePassword() {
-  const ui = SpreadsheetApp.getUi();
-  const r = ui.prompt('パスワード変更', '新しいパスワードを入力してください', ui.ButtonSet.OK_CANCEL);
-  if (r.getSelectedButton() !== ui.Button.OK) return;
-  const newPw = r.getResponseText().trim();
-  if (!newPw) { ui.alert('パスワードが空です'); return; }
-  PropertiesService.getScriptProperties().setProperty('PASSWORD_HASH', sha256(newPw));
-  ui.alert('✅ パスワードを変更しました');
+function renderSelDisplay(){
+  const t=currentType;const s=state[t];
+  const el=document.getElementById('sel-display');
+  if(s.selected.length===0){el.innerHTML='<span style="font-size:12px;color:var(--text3)">番号を選んでください</span>';return;}
+  el.innerHTML=s.selected.map(n=>`<div class="sel-ball">${n}</div>`).join('');
 }
 
-// ===== 設定確認 =====
-function checkConfig() {
-  const props  = PropertiesService.getScriptProperties();
-  const id     = props.getProperty('SHEET_ID');
-  const idHash = props.getProperty('LOGINID_HASH');
-  const pwHash = props.getProperty('PASSWORD_HASH');
-  Logger.log('SHEET_ID: '      + (id     ? '設定済み (' + id + ')' : '未設定'));
-  Logger.log('LOGINID_HASH: '  + (idHash ? '設定済み'              : '未設定'));
-  Logger.log('PASSWORD_HASH: ' + (pwHash ? '設定済み'              : '未設定'));
+function clearSel(){state[currentType].selected=[];renderBalls();renderSelDisplay();}
+
+function quickPick(){
+  const t=currentType;const tp=TYPES[t];
+  state[t].selected=[];
+  const pool=[];for(let i=tp.min;i<=tp.max;i++)pool.push(i);
+  while(state[t].selected.length<tp.pick){
+    const idx=Math.floor(Math.random()*pool.length);
+    state[t].selected.push(pool.splice(idx,1)[0]);
+  }
+  state[t].selected.sort((a,b)=>a-b);
+  renderBalls();renderSelDisplay();
+  document.getElementById('suggest-box').style.display='none';
+  showToast('ランダムで選びました');
 }
+
+function aiSuggest(){
+  const t=currentType;const tp=TYPES[t];const s=state[t];
+  state[t].selected=[];
+  const entries=Object.entries(s.freq).map(([k,v])=>[+k,v]).sort((a,b)=>b[1]-a[1]);
+  const total=s.histories.length;
+  let pool,method;
+  if(total<3){
+    pool=[];for(let i=tp.min;i<=tp.max;i++)pool.push(i);
+    method='データ不足のためランダム選択';
+  } else {
+    const topN=Math.min(Math.ceil((tp.max-tp.min+1)*0.4),entries.length);
+    pool=entries.slice(0,topN).map(x=>x[0]);
+    method=`出現頻度上位${topN}件から重み付き選択`;
+  }
+  const poolCopy=[...pool];
+  while(state[t].selected.length<tp.pick&&poolCopy.length>0){
+    const idx=Math.floor(Math.random()*poolCopy.length);
+    state[t].selected.push(poolCopy.splice(idx,1)[0]);
+  }
+  state[t].selected.sort((a,b)=>a-b);
+  renderBalls();renderSelDisplay();
+  const box=document.getElementById('suggest-box');
+  document.getElementById('suggest-content').innerHTML=`<div style="font-size:11px;color:var(--text2);margin-bottom:8px">${method}</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">${state[t].selected.map(n=>`<div class="sel-ball" style="width:34px;height:34px;font-size:12px">${n}</div>`).join('')}</div>
+  <div style="font-size:10px;color:var(--text3);margin-top:8px">※確率的な根拠はありません。エンタメ用途でご利用ください。</div>`;
+  box.style.display='block';
+}
+
+// ===== データ追加 =====
+async function addHistoryBall(){
+  const t=currentType;const tp=TYPES[t];
+  const raw=document.getElementById('hist-input').value;
+  const nums=raw.split(/[\s,、]+/).map(x=>+x.trim()).filter(x=>x>=tp.min&&x<=tp.max);
+  const unique=[...new Set(nums)];
+  if(unique.length!==tp.pick){showToast(`${tp.pick}個の番号を入力してください（${tp.min}〜${tp.max}）`,true);return;}
+  const btn=document.getElementById('btn-add');
+  btn.disabled=true;setSyncStatus('loading');
+  try{
+    const r=await apiPost({action:'add',type:t,numbers:unique});
+    if(!r.ok)throw new Error(r.error);
+    document.getElementById('hist-input').value='';
+    await syncAll();showToast('保存しました');
+  }catch(e){setSyncStatus('err');showToast('保存失敗: '+e.message,true);}
+  finally{btn.disabled=false;}
+}
+
+async function loadCSV(e){
+  const t=currentType;const tp=TYPES[t];
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async ev=>{
+    const lines=ev.target.result.split(/\r?\n/).filter(l=>l.trim());
+    let added=0;setSyncStatus('loading');
+    for(const line of lines){
+      const nums=line.split(/[,\s]+/).map(x=>+x.trim()).filter(x=>x>=tp.min&&x<=tp.max);
+      const unique=[...new Set(nums)];
+      if(unique.length===tp.pick){
+        try{const r=await apiPost({action:'add',type:t,numbers:unique});if(r.ok)added++;}catch(err){}
+      }
+    }
+    e.target.value='';await syncAll();showToast(`${added}件 インポートしました`);
+  };
+  reader.readAsText(file);
+}
+
+async function removeHist(rowIndex){
+  setSyncStatus('loading');
+  try{
+    const r=await apiPost({action:'delete',type:currentType,rowIndex});
+    if(!r.ok)throw new Error(r.error);
+    await syncAll();showToast('削除しました');
+  }catch(e){setSyncStatus('err');showToast('削除失敗: '+e.message,true);}
+}
+
+async function clearAll(){
+  if(!confirm('このタイプの全データを消去しますか？'))return;
+  setSyncStatus('loading');
+  try{
+    const r=await apiPost({action:'clear',type:currentType});
+    if(!r.ok)throw new Error(r.error);
+    await syncAll();showToast('全データを消去しました');
+  }catch(e){setSyncStatus('err');showToast('消去失敗: '+e.message,true);}
+}
+
+// ===== 描画 =====
+function afterUpdate(){
+  updateMetrics();renderHistList();renderFreq();renderBalls();renderSelDisplay();renderChart();
+  if(isNum(currentType)){renderDigitFreq();renderNumHist();}
+}
+
+function renderHistList(){
+  const t=currentType;const s=state[t];
+  const el=document.getElementById('hist-list');
+  if(s.histories.length===0){el.innerHTML='';return;}
+  const show=[...s.histories].reverse().slice(0,10);
+  el.innerHTML=`<div style="font-size:10px;color:var(--text3);margin-bottom:6px">全${s.histories.length}件（直近10件表示）</div>`+
+  show.map((rec,i)=>{
+    const nums=rec.nums||rec;
+    const ts=rec.timestamp?`<span style="font-size:9px;color:var(--text3);margin-left:auto">${rec.timestamp}</span>`:'';
+    return`<div class="hist-row">
+      <span class="h-idx">#${s.histories.length-i}</span>
+      ${nums.map(n=>`<div class="h-ball">${n}</div>`).join('')}
+      ${ts}
+      <button onclick="removeHist(${rec.rowIndex})" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;margin-left:4px">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function renderFreq(){
+  const t=currentType;if(isNum(t))return;
+  const s=state[t];const tp=TYPES[t];
+  const el=document.getElementById('freq-list');
+  if(s.histories.length===0){el.innerHTML='<div style="font-size:12px;color:var(--text3)">データを読み込むと表示されます</div>';return;}
+  const entries=[];
+  for(let i=tp.min;i<=tp.max;i++)entries.push([i,s.freq[i]||0]);
+  entries.sort((a,b)=>b[1]-a[1]);
+  const maxF=entries[0][1]||1;
+  const n=entries.length;
+  const hotIdx=Math.ceil(n*0.2),warmIdx=Math.ceil(n*0.5),coldIdx=n-Math.ceil(n*0.2);
+  el.innerHTML=entries.map(([num,f],i)=>{
+    const pct=Math.round(f/maxF*100);
+    const color=i<hotIdx?'#e84a7a':i<warmIdx?'#e8a44a':i>=coldIdx?'#4a9ae8':'#5a5a80';
+    return`<div class="freq-row">
+      <span class="freq-num">${num}</span>
+      <div class="freq-bar-bg"><div class="freq-bar" style="width:${pct}%;background:${color}"></div></div>
+      <span class="freq-cnt">${f}</span>
+    </div>`;
+  }).join('');
+}
+
+let chartInst=null;
+function renderChart(){
+  const t=currentType;if(isNum(t))return;
+  const s=state[t];const tp=TYPES[t];
+  if(s.histories.length===0){if(chartInst){chartInst.destroy();chartInst=null;}return;}
+  const labels=[],data=[],colors=[];
+  const{hot,warm,cold}=getHotCold(t);
+  for(let i=tp.min;i<=tp.max;i++){
+    labels.push(String(i));data.push(s.freq[i]||0);
+    colors.push(hot.has(i)?'#e84a7a':cold.has(i)?'#4a9ae8':warm.has(i)?'#e8a44a':'#3a3a50');
+  }
+  if(chartInst)chartInst.destroy();
+  const ctx=document.getElementById('freqChart').getContext('2d');
+  chartInst=new Chart(ctx,{
+    type:'bar',
+    data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:0,borderRadius:2}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{title:i=>`番号 ${i[0].label}`,label:i=>`${i.raw}回`}}},
+      scales:{
+        x:{ticks:{font:{size:9},color:'#5a5a70',maxRotation:0,autoSkip:true,maxTicksLimit:20},grid:{display:false}},
+        y:{ticks:{font:{size:10},color:'#5a5a70',stepSize:1},grid:{color:'rgba(255,255,255,0.05)'}}
+      }
+    }
+  });
+}
+
+function updateMetrics(){
+  const t=currentType;const s=state[t];
+  document.getElementById('m-count').textContent=s.histories.length;
+  if(s.histories.length===0){['m-hot','m-cold','m-avg'].forEach(id=>document.getElementById(id).textContent='—');return;}
+  if(isNum(t)){
+    const vals=s.histories.map(x=>+x.nums[0]);
+    document.getElementById('m-avg').textContent=Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+    const dFreq=buildDigitFreq(t);
+    if(dFreq[0]){
+      const sorted=[...dFreq[0]].sort((a,b)=>b[1]-a[1]);
+      document.getElementById('m-hot').textContent=sorted[0][0];
+      document.getElementById('m-cold').textContent=sorted[sorted.length-1][0];
+    }
+  } else {
+    const entries=Object.entries(s.freq).sort((a,b)=>b[1]-a[1]);
+    document.getElementById('m-hot').textContent=entries[0][0];
+    document.getElementById('m-cold').textContent=entries[entries.length-1][0];
+    const all=s.histories.flatMap(x=>x.nums||x);
+    document.getElementById('m-avg').textContent=(all.reduce((a,b)=>a+(+b),0)/all.length).toFixed(1);
+  }
+}
+
+// ===== ナンバーズ系 =====
+async function addHistoryNum(){
+  const t=currentType;const tp=TYPES[t];const digits=tp.digits;
+  const raw=document.getElementById('num-input').value.trim();
+  if(!/^\d+$/.test(raw)||raw.length>digits){showToast(`${digits}桁以内の数字を入力してください`,true);return;}
+  const padded=raw.padStart(digits,'0');
+  const btn=document.getElementById('btn-add-num');
+  btn.disabled=true;setSyncStatus('loading');
+  try{
+    const r=await apiPost({action:'add',type:t,numbers:[padded]});
+    if(!r.ok)throw new Error(r.error);
+    document.getElementById('num-input').value='';
+    await syncAll();showToast('保存しました');
+  }catch(e){setSyncStatus('err');showToast('保存失敗: '+e.message,true);}
+  finally{btn.disabled=false;}
+}
+
+async function loadCSVNum(e){
+  const t=currentType;const tp=TYPES[t];const digits=tp.digits;
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async ev=>{
+    const lines=ev.target.result.split(/\r?\n/).filter(l=>l.trim());
+    let added=0;setSyncStatus('loading');
+    for(const line of lines){
+      const raw=line.trim().split(/[,\s]/)[0];
+      if(/^\d{1,4}$/.test(raw)&&raw.length<=digits){
+        try{const r=await apiPost({action:'add',type:t,numbers:[raw.padStart(digits,'0')]});if(r.ok)added++;}catch(err){}
+      }
+    }
+    e.target.value='';await syncAll();showToast(`${added}件 インポートしました`);
+  };
+  reader.readAsText(file);
+}
+
+function renderNumHist(){
+  const t=currentType;const s=state[t];
+  const el=document.getElementById('num-hist-list');
+  if(!el||s.histories.length===0){if(el)el.innerHTML='';return;}
+  const show=[...s.histories].reverse().slice(0,10);
+  el.innerHTML=`<div style="font-size:10px;color:var(--text3);margin-bottom:6px">全${s.histories.length}件（直近10件表示）</div>`+
+  show.map((rec,i)=>`<div class="hist-row">
+    <span class="h-idx">#${s.histories.length-i}</span>
+    <span style="font-family:'Space Mono',monospace;font-size:14px;color:var(--accent);letter-spacing:0.1em">${rec.nums[0]}</span>
+    ${rec.timestamp?`<span style="font-size:9px;color:var(--text3);margin-left:auto">${rec.timestamp}</span>`:''}
+    <button onclick="removeHist(${rec.rowIndex})" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;margin-left:4px">✕</button>
+  </div>`).join('');
+}
+
+function buildDigitFreq(t){
+  const s=state[t];const tp=TYPES[t];const digits=tp.digits;
+  const dFreq=[];
+  for(let d=0;d<digits;d++)dFreq.push(new Map());
+  s.histories.forEach(rec=>{
+    const str=String(rec.nums[0]).padStart(digits,'0');
+    for(let d=0;d<digits;d++){
+      const dig=+str[d];
+      dFreq[d].set(dig,(dFreq[d].get(dig)||0)+1);
+    }
+  });
+  return dFreq;
+}
+
+function renderDigitFreq(){
+  const t=currentType;if(!isNum(t))return;
+  const tp=TYPES[t];
+  const el=document.getElementById('digit-freq');
+  if(state[t].histories.length===0){el.innerHTML='<div style="font-size:12px;color:var(--text3)">データを読み込むと表示されます</div>';return;}
+  const dFreq=buildDigitFreq(t);
+  const digitNames=['1桁目','2桁目','3桁目','4桁目'];
+  el.innerHTML=dFreq.map((map,d)=>{
+    const sorted=[...map.entries()].sort((a,b)=>a[0]-b[0]);
+    const maxF=Math.max(...sorted.map(x=>x[1]),1);
+    return`<div style="margin-bottom:10px">
+      <div style="font-size:10px;color:var(--text3);margin-bottom:4px">${digitNames[d]}</div>
+      ${sorted.map(([digit,cnt])=>`<div class="freq-row">
+        <span class="freq-num">${digit}</span>
+        <div class="freq-bar-bg"><div class="freq-bar" style="width:${Math.round(cnt/maxF*100)}%;background:#e8c84a"></div></div>
+        <span class="freq-cnt">${cnt}</span>
+      </div>`).join('')}
+    </div>`;
+  }).join('');
+}
+
+function numQuickPick(){
+  const t=currentType;const digits=TYPES[t].digits;
+  let num='';for(let i=0;i<digits;i++)num+=Math.floor(Math.random()*10);
+  document.getElementById('num-display').textContent=num;
+  document.getElementById('num-pick-input').value=num;
+  document.getElementById('num-suggest-box').style.display='none';
+  showToast('ランダムで生成しました');
+}
+
+function numAiSuggest(){
+  const t=currentType;const s=state[t];const tp=TYPES[t];const digits=tp.digits;
+  const dFreq=buildDigitFreq(t);
+  let result='',method='';
+  if(s.histories.length<3){
+    for(let i=0;i<digits;i++)result+=Math.floor(Math.random()*10);
+    method='データ不足のためランダム';
+  } else {
+    for(let d=0;d<digits;d++){
+      const entries=[...dFreq[d].entries()].sort((a,b)=>b[1]-a[1]);
+      const top=entries.slice(0,5).map(x=>x[0]);
+      result+=top[Math.floor(Math.random()*top.length)];
+    }
+    method='各桁の出現頻度上位5件から選択';
+  }
+  document.getElementById('num-display').textContent=result;
+  document.getElementById('num-pick-input').value=result;
+  const box=document.getElementById('num-suggest-box');
+  document.getElementById('num-suggest-content').innerHTML=`<div style="font-size:11px;color:var(--text2);margin-bottom:4px">${method}</div>
+  <div style="font-size:10px;color:var(--text3)">※エンタメ用途です。確率的優位性はありません。</div>`;
+  box.style.display='block';
+}
+
+document.getElementById('num-pick-input').addEventListener('input',e=>{
+  const v=e.target.value.trim();
+  if(v)document.getElementById('num-display').textContent=v;
+});
+
+function showToast(msg, isErr=false){
+  const el=document.getElementById('toast');
+  el.textContent=msg;
+  el.className=isErr?'err':'';
+  el.style.opacity='1';
+  setTimeout(()=>el.style.opacity='0',2500);
+}
+</script>
+</body>
+</html>
