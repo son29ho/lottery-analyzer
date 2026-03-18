@@ -269,7 +269,7 @@ const TYPES={
 };
 
 // ★ デプロイ後にGAS Web AppのURLをここに貼り付けてください
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbztlquphoVJZTHtFTboS6qyiMHP4jp0M9WTZLVuGkJ-gsAWxrGI_yKxsjj_rJKtDFg/exec';
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbyxai7aKhGRyJX0_NWt0yCIRqas7q0fvKeReuR0FjwuLonJFcuuUy_OE0GLAN9bqog/exec';
 
 const TOKEN_KEY   = 'lottery_token';
 const EXPIRE_KEY  = 'lottery_token_expire';
@@ -303,8 +303,14 @@ async function login(){
   btn.disabled=true;btn.textContent='確認中...';err.textContent='';
 
   try{
-    const ua = navigator.userAgent;
-    const r  = await apiPost({action:'login', loginId, password:pw, ua});
+    // ログインはトークン不要・直接fetchでGETリクエスト
+    const ua    = encodeURIComponent(navigator.userAgent.substring(0,80));
+    const idEnc = encodeURIComponent(loginId);
+    const pwEnc = encodeURIComponent(pw);
+    const url   = API_URL + '?action=login&loginId=' + idEnc + '&password=' + pwEnc + '&ua=' + ua;
+    const resp  = await fetch(url);
+    if(!resp.ok) throw new Error('HTTP ' + resp.status);
+    const r = await resp.json();
     if(!r.ok){
       err.textContent = r.error || 'ログインに失敗しました';
       updateAttemptBar(r.remaining);
@@ -317,10 +323,10 @@ async function login(){
     localStorage.setItem(TOKEN_KEY,  SESSION_TOKEN);
     localStorage.setItem(EXPIRE_KEY, String(expire));
     showMain();
-    syncAll();
+    await syncAll();
     startSessionTimer(expire);
   }catch(e){
-    err.textContent = 'サーバーに接続できませんでした。しばらく後で再試行してください';
+    err.textContent = 'サーバーに接続できませんでした: ' + e.message;
   }finally{
     btn.disabled=false;btn.textContent='ログイン';
   }
@@ -408,10 +414,14 @@ function setSyncStatus(s){
 
 async function apiCall(params){
   const base={...params};
-  if(SESSION_TOKEN && !base.token) base.token=SESSION_TOKEN;
+  // loginアクション以外はトークンを自動付与
+  if(base.action !== 'login' && SESSION_TOKEN && !base.token) base.token=SESSION_TOKEN;
   base.ua=navigator.userAgent.substring(0,80);
   if(Array.isArray(base.numbers)) base.numbers=base.numbers.join(',');
-  const query=Object.entries(base).map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(v)).join('&');
+  const query=Object.entries(base)
+    .filter(([,v])=>v!==undefined&&v!==null&&v!=='')
+    .map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(v))
+    .join('&');
   const r=await fetch(API_URL+'?'+query);
   if(!r.ok) throw new Error('HTTP '+r.status);
   const data=await r.json();
